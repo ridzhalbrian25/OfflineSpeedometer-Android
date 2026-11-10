@@ -2,9 +2,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.example.offlinespeedometer">
 
-    <!-- Izin GPS Hardware untuk perhitungan kecepatan satelit 100% Offline (Tanpa Internet) -->
+    <!-- Izin GPS Hardware untuk pembacaan kecepatan satelit 100% Offline (Tanpa Internet) -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- Izin getar haptic untuk alarm batas kecepatan & wake lock layar tetap menyala -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- Deklarasi fitur hardware GPS -->
     <uses-feature
@@ -19,7 +23,8 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:screenOrientation="portrait">
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|screenSize|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
