@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- 1. Inactive Track Arc (Grey #4B5563, R=23, 135 to 45 deg) -->
+    <path
+        android:strokeColor="#475569"
+        android:strokeWidth="4.2"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M 37.74,70.26 A 23,23 0 1 1 70.26,70.26" />
+
+    <!-- 2. Active Track Arc (Neon Cyan #00E5FF, 135 to 325 deg) -->
+    <path
+        android:strokeColor="#00E5FF"
+        android:strokeWidth="4.2"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M 37.74,70.26 A 23,23 0 1 1 72.84,40.81" />
+
+    <!-- 3. Lead Dot at 325 deg -->
+    <path
+        android:fillColor="#E0FFFF"
+        android:pathData="M72.84,38.71 A2.1,2.1 0 1,1 72.83,38.71 Z" />
+
+    <!-- 4. Major Ticks (White) -->
+    <!-- Tick 135 deg -->
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="1.6" android:strokeLineCap="round" android:pathData="M39.15,68.85 L41.27,66.73" />
+    <!-- Tick 180 deg -->
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="1.6" android:strokeLineCap="round" android:pathData="M33.00,54.00 L36.00,54.00" />
+    <!-- Tick 225 deg -->
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="1.6" android:strokeLineCap="round" android:pathData="M39.15,39.15 L41.27,41.27" />
+    <!-- Tick 270 deg -->
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="1.6" android:strokeLineCap="round" android:pathData="M54.00,33.00 L54.00,36.00" />
+    <!-- Tick 315 deg -->
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="1.6" android:strokeLineCap="round" android:pathData="M68.85,39.15 L66.73,41.27" />
+    <!-- Tick 360 deg -->
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="1.6" android:strokeLineCap="round" android:pathData="M75.00,54.00 L72.00,54.00" />
+    <!-- Tick 45 deg -->
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="1.6" android:strokeLineCap="round" android:pathData="M68.85,68.85 L66.73,66.73" />
+
+    <!-- 5. Tapered Needle (Pointing to 325 deg / High Speed) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 72.0,41.4 L 52.8,55.4 L 50.8,52.2 Z" />
+    <!-- Red Accent at Needle Tip -->
+    <path
+        android:strokeColor="#EF4444"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round"
+        android:pathData="M 66.0,45.6 L 72.0,41.4" />
+
+    <!-- 6. Symmetric Center Hub (Concentric circles at exactly 54, 54) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,48.5 A5.5,5.5 0 1,1 53.99,48.5 Z" />
+    <path
+        android:fillColor="#0B0F19"
+        android:pathData="M54,50.4 A3.6,3.6 0 1,1 53.99,50.4 Z" />
+    <path
+        android:fillColor="#00E5FF"
+        android:pathData="M54,52.5 A1.5,1.5 0 1,1 53.99,52.5 Z" />
+
+    <!-- 7. Bottom GPS Pill -->
+    <path
+        android:fillColor="#101826"
+        android:strokeColor="#00E5FF"
+        android:strokeWidth="1.0"
+        android:pathData="M44,67 h16 a4,4 0 0,1 4,4 v0 a4,4 0 0,1 -4,4 h-16 a4,4 0 0,1 -4,-4 v0 a4,4 0 0,1 4,-4 Z" />
+    <!-- GPS Text Geometry -->
+    <!-- G -->
+    <path android:strokeColor="#00E5FF" android:strokeWidth="1.0" android:pathData="M48,69.5 h-1.5 a1.5,1.5 0 0,0 -1.5,1.5 v1 a1.5,1.5 0 0,0 1.5,1.5 h1.5 v-1.8 h-1.2" />
+    <!-- P -->
+    <path android:strokeColor="#00E5FF" android:strokeWidth="1.0" android:pathData="M52,73.5 v-4 h1.6 a1.2,1.2 0 0,1 1.2,1.2 v0.2 a1.2,1.2 0 0,1 -1.2,1.2 h-1.6" />
+    <!-- S -->
+    <path android:strokeColor="#00E5FF" android:strokeWidth="1.0" android:pathData="M59.5,70 h-1.5 a0.8,0.8 0 0,0 -0.8,0.8 v0.2 a0.8,0.8 0 0,0 0.8,0.8 h1.0 a0.8,0.8 0 0,1 0.8,0.8 v0.2 a0.8,0.8 0 0,1 -0.8,0.8 h-1.6" />
+</vector>
