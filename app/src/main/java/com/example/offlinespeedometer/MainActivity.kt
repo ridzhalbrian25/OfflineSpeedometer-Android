@@ -20,7 +20,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -39,6 +38,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -46,7 +50,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -68,29 +71,21 @@ import kotlin.math.sin
 
 enum class SpeedUnit(
     val label: String,
-    val distanceLabel: String,
-    val altitudeLabel: String,
+    val unitText: String,
+    val distanceUnitText: String,
     val speedMultiplier: Float,     // dari m/s
     val distanceMultiplier: Double, // dari meter
-    val altitudeMultiplier: Double, // dari meter
-    val maxGaugeValue: Int,
-    val tickStep: Int
+    val maxGaugeValue: Int
 ) {
-    METRIC("km/h", "km", "m", 3.6f, 0.001, 1.0, 240, 20),
-    IMPERIAL("mph", "mi", "ft", 2.236936f, 0.000621371, 3.28084, 160, 20),
-    KNOTS("knots", "nm", "ft", 1.943844f, 0.000539957, 3.28084, 140, 20)
+    METRIC("KM/H", "Kmh", "Km", 3.6f, 0.001, 220),
+    IMPERIAL("MPH", "Mph", "Mi", 2.236936f, 0.000621371, 140),
+    KNOTS("KNOTS", "Kn", "Nm", 1.943844f, 0.000539957, 120)
 }
 
-enum class CockpitTheme(
-    val title: String,
-    val primary: Color,
-    val accent: Color,
-    val warning: Color
-) {
-    CYBER_EMERALD("Emerald", Color(0xFF10B981), Color(0xFF00F5D4), Color(0xFFEF4444)),
-    ELECTRIC_CYAN("Cyan", Color(0xFF06B6D4), Color(0xFF38BDF8), Color(0xFFF43F5E)),
-    SOLAR_AMBER("Amber", Color(0xFFF59E0B), Color(0xFFFBBF24), Color(0xFFEF4444)),
-    PURE_OLED("OLED White", Color(0xFFF8FAFC), Color(0xFF94A3B8), Color(0xFFFF3B30))
+enum class NavigationTab(val title: String) {
+    ANALOG("Analog"),
+    DIGITAL("Digital"),
+    MAP("Map")
 }
 
 class MainActivity : ComponentActivity() {
@@ -99,24 +94,27 @@ class MainActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         setContent {
-            OfflineSpeedometerApp()
+            MaterialTheme(colorScheme = darkColorScheme()) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = Color(0xFF000000)
+                ) {
+                    GpsSpeedometerScreen()
+                }
+            }
         }
     }
 }
 
 @Composable
-fun OfflineSpeedometerApp() {
+fun GpsSpeedometerScreen() {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("speedometer_prefs", Context.MODE_PRIVATE) }
 
+    var activeTab by remember { mutableStateOf(NavigationTab.ANALOG) }
     var unit by remember {
         val saved = prefs.getString("unit", SpeedUnit.METRIC.name) ?: SpeedUnit.METRIC.name
         mutableStateOf(try { SpeedUnit.valueOf(saved) } catch (_: Exception) { SpeedUnit.METRIC })
-    }
-
-    var selectedTheme by remember {
-        val saved = prefs.getString("theme", CockpitTheme.CYBER_EMERALD.name) ?: CockpitTheme.CYBER_EMERALD.name
-        mutableStateOf(try { CockpitTheme.valueOf(saved) } catch (_: Exception) { CockpitTheme.CYBER_EMERALD })
     }
 
     var speedLimitKmh by remember {
@@ -130,6 +128,10 @@ fun OfflineSpeedometerApp() {
         )
     }
 
+    var isTripRunning by remember { mutableStateOf(true) }
+    var tripElapsedSeconds by remember { mutableLongStateOf(0L) }
+    var movingSeconds by remember { mutableLongStateOf(0L) }
+
     var currentSpeedMps by remember { mutableFloatStateOf(0f) }
     var maxSpeedMps by remember { mutableFloatStateOf(0f) }
     var totalDistanceMeters by remember { mutableDoubleStateOf(0.0) }
@@ -139,18 +141,14 @@ fun OfflineSpeedometerApp() {
     var hasBearing by remember { mutableStateOf(false) }
     var latitude by remember { mutableDoubleStateOf(0.0) }
     var longitude by remember { mutableDoubleStateOf(0.0) }
-    var hasValidCoords by remember { mutableStateOf(false) }
-
-    var isHudMirror by remember { mutableStateOf(false) }
-    var isTripPaused by remember { mutableStateOf(false) }
-    var tripElapsedSeconds by remember { mutableLongStateOf(0L) }
-    var movingSeconds by remember { mutableLongStateOf(0L) }
-    var showResetDialog by remember { mutableStateOf(false) }
-    var showSpeedLimitDialog by remember { mutableStateOf(false) }
-    var lastLocation by remember { mutableStateOf<Location?>(null) }
     var gpsFixCount by remember { mutableIntStateOf(0) }
 
-    // Haptic / vibration helper
+    var isHudMirror by remember { mutableStateOf(false) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
+    var showResetDialog by remember { mutableStateOf(false) }
+    var lastLocation by remember { mutableStateOf<Location?>(null) }
+
+    // Haptic vibration helper
     fun triggerVibration() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -180,20 +178,20 @@ fun OfflineSpeedometerApp() {
             permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
     }
 
-    // Trip Timer coroutine
-    LaunchedEffect(isTripPaused) {
+    // Timer Coroutine
+    LaunchedEffect(isTripRunning) {
         while (true) {
             delay(1000L)
-            if (!isTripPaused) {
+            if (isTripRunning) {
                 tripElapsedSeconds += 1L
-                if (currentSpeedMps > 0.5f) {
+                if (currentSpeedMps > 0.45f) {
                     movingSeconds += 1L
                 }
             }
         }
     }
 
-    // GPS Location listener
+    // Location Updates
     DisposableEffect(hasLocationPermission) {
         val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
         val listener = object : LocationListener {
@@ -211,7 +209,7 @@ fun OfflineSpeedometerApp() {
                 val cleanMps = if (measuredMps < 0.35f) 0f else measuredMps
                 currentSpeedMps = cleanMps
 
-                if (!isTripPaused) {
+                if (isTripRunning) {
                     if (cleanMps > maxSpeedMps) {
                         maxSpeedMps = cleanMps
                     }
@@ -232,7 +230,6 @@ fun OfflineSpeedometerApp() {
                 }
                 latitude = location.latitude
                 longitude = location.longitude
-                hasValidCoords = true
             }
 
             override fun onProviderEnabled(provider: String) {}
@@ -255,24 +252,30 @@ fun OfflineSpeedometerApp() {
         }
     }
 
-    // Calculations
+    // Conversions
     val displaySpeed = currentSpeedMps * unit.speedMultiplier
     val maxDisplaySpeed = maxSpeedMps * unit.speedMultiplier
     val displayDistance = totalDistanceMeters * unit.distanceMultiplier
-    val displayAltitude = altitudeMeters * unit.altitudeMultiplier
-    val displayAccuracy = accuracyMeters * unit.altitudeMultiplier
-
-    val avgSpeedDisplay = if (movingSeconds > 5L) {
+    val avgSpeedDisplay = if (movingSeconds > 3L) {
         (totalDistanceMeters / movingSeconds.toDouble() * unit.speedMultiplier).toFloat()
     } else 0f
 
-    // Speed limit evaluation
+    // GPS Signal strength level (0 to 4 bars)
+    val gpsSignalLevel = when {
+        !hasLocationPermission || gpsFixCount == 0 -> 0
+        accuracyMeters in 0.1f..5.0f -> 4   // Sangat Kuat
+        accuracyMeters in 5.0f..12.0f -> 3  // Kuat
+        accuracyMeters in 12.0f..30.0f -> 2 // Sedang
+        accuracyMeters > 30.0f -> 1         // Lemah
+        else -> 1
+    }
+
+    // Speed limit alert
     val activeSpeedLimitInUnit = if (speedLimitKmh > 0f) {
         speedLimitKmh * (unit.speedMultiplier / 3.6f)
     } else 0f
     val isOverSpeed = activeSpeedLimitInUnit > 0f && displaySpeed > activeSpeedLimitInUnit
 
-    // Over speed vibration alert
     var lastAlertTime by remember { mutableLongStateOf(0L) }
     LaunchedEffect(isOverSpeed) {
         if (isOverSpeed) {
@@ -284,14 +287,14 @@ fun OfflineSpeedometerApp() {
         }
     }
 
-    // Animated speed value for ultra-smooth needle movement
+    // Animated speed for needle & gauge
     val animatedSpeed by animateFloatAsState(
         targetValue = displaySpeed,
         animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
         label = "animatedSpeed"
     )
 
-    // Pulse animation for over-speed warning
+    // Pulse animation for over-speed
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val pulseAlpha by infiniteTransition.animateFloat(
         initialValue = 0.3f,
@@ -303,313 +306,402 @@ fun OfflineSpeedometerApp() {
         label = "pulseAlpha"
     )
 
-    val bgColor = if (isHudMirror) Color(0xFF000000) else Color(0xFF070B14)
-
-    MaterialTheme(colorScheme = darkColorScheme()) {
-        Surface(
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    scaleX = if (isHudMirror) -1f else 1f
-                },
-            color = bgColor
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                // TOP APP BAR & STATUS
-                TopHeaderBar(
-                    unit = unit,
-                    selectedTheme = selectedTheme,
-                    isHudMirror = isHudMirror,
-                    accuracyMeters = accuracyMeters,
-                    gpsFixCount = gpsFixCount,
-                    hasPermission = hasLocationPermission,
-                    onUnitChange = { newUnit ->
-                        unit = newUnit
-                        prefs.edit().putString("unit", newUnit.name).apply()
-                    },
-                    onThemeChange = { newTheme ->
-                        selectedTheme = newTheme
-                        prefs.edit().putString("theme", newTheme.name).apply()
-                    },
-                    onRequestPermission = {
-                        permissionLauncher.launch(
-                            arrayOf(
-                                Manifest.permission.ACCESS_FINE_LOCATION,
-                                Manifest.permission.ACCESS_COARSE_LOCATION
-                            )
-                        )
-                    }
-                )
-
-                // OVER SPEED WARNING BANNER (When exceeded)
-                AnimatedVisibility(
-                    visible = isOverSpeed,
-                    enter = fadeIn(),
-                    exit = fadeOut()
-                ) {
-                    Surface(
-                        color = Color(0xFFDC2626).copy(alpha = pulseAlpha),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .border(1.5.dp, Color(0xFFEF4444), RoundedCornerShape(12.dp))
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Text(
-                                text = "⚠️ PERINGATAN: MELEBIHI BATAS KECEPATAN (${activeSpeedLimitInUnit.roundToInt()} ${unit.label.uppercase()})",
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp,
-                                textAlign = TextAlign.Center
-                            )
-                        }
-                    }
-                }
-
-                // SPEEDOMETER GAUGE DIAL (The Hero Component)
-                SpeedometerGauge(
-                    speed = animatedSpeed,
-                    rawSpeed = displaySpeed,
-                    maxGauge = unit.maxGaugeValue,
-                    tickStep = unit.tickStep,
-                    unitLabel = unit.label.uppercase(),
-                    theme = selectedTheme,
-                    isOverSpeed = isOverSpeed,
-                    pulseAlpha = pulseAlpha,
-                    speedLimit = activeSpeedLimitInUnit
-                )
-
-                // COMPREHENSIVE TELEMETRY METRICS GRID (6 Cards)
-                TelemetryGrid(
-                    maxSpeed = String.format("%.1f %s", maxDisplaySpeed, unit.label),
-                    avgSpeed = String.format("%.1f %s", avgSpeedDisplay, unit.label),
-                    distance = String.format("%.2f %s", displayDistance, unit.distanceLabel),
-                    tripTime = formatDuration(tripElapsedSeconds),
-                    altitude = String.format("%.0f %s", displayAltitude, unit.altitudeLabel),
-                    heading = if (hasBearing) getDirectionLabel(bearingDegrees) else "—",
-                    accuracy = if (accuracyMeters > 0f) String.format("±%.0f %s", displayAccuracy, unit.altitudeLabel) else "Mencari GPS...",
-                    coords = if (hasValidCoords) String.format("%.4f°, %.4f°", latitude, longitude) else "—",
-                    theme = selectedTheme
-                )
-
-                // BOTTOM ACTION CONTROLS (HUD, Speed Limit, Trip Pause, Reset)
-                ControlActionBar(
-                    isHudMirror = isHudMirror,
-                    isTripPaused = isTripPaused,
-                    activeLimitKmh = speedLimitKmh,
-                    theme = selectedTheme,
-                    onToggleHud = { isHudMirror = !isHudMirror },
-                    onTogglePause = { isTripPaused = !isTripPaused },
-                    onOpenSpeedLimit = { showSpeedLimitDialog = true },
-                    onResetClick = { showResetDialog = true }
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                scaleX = if (isHudMirror) -1f else 1f
             }
-
-            // RESET CONFIRMATION DIALOG
-            if (showResetDialog) {
-                AlertDialog(
-                    onDismissRequest = { showResetDialog = false },
-                    title = { Text("Reset Data Perjalanan?") },
-                    text = { Text("Kecepatan maksimum, jarak tempuh, dan waktu perjalanan akan diatur ulang ke nol.") },
-                    confirmButton = {
-                        Button(
-                            onClick = {
-                                maxSpeedMps = 0f
-                                totalDistanceMeters = 0.0
-                                tripElapsedSeconds = 0L
-                                movingSeconds = 0L
-                                showResetDialog = false
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))
-                        ) {
-                            Text("Reset Sekarang")
-                        }
-                    },
-                    dismissButton = {
-                        OutlinedButton(onClick = { showResetDialog = false }) {
-                            Text("Batal")
-                        }
-                    }
-                )
-            }
-
-            // SPEED LIMIT SELECTOR DIALOG
-            if (showSpeedLimitDialog) {
-                SpeedLimitDialog(
-                    currentLimitKmh = speedLimitKmh,
-                    unit = unit,
-                    onSelectLimit = { chosenKmh ->
-                        speedLimitKmh = chosenKmh
-                        prefs.edit().putFloat("speed_limit_kmh", chosenKmh).apply()
-                        showSpeedLimitDialog = false
-                    },
-                    onDismiss = { showSpeedLimitDialog = false }
-                )
-            }
-        }
-    }
-}
-
-// ==========================================
-// TOP HEADER BAR & CONTROLS
-// ==========================================
-@Composable
-fun TopHeaderBar(
-    unit: SpeedUnit,
-    selectedTheme: CockpitTheme,
-    isHudMirror: Boolean,
-    accuracyMeters: Float,
-    gpsFixCount: Int,
-    hasPermission: Boolean,
-    onUnitChange: (SpeedUnit) -> Unit,
-    onThemeChange: (CockpitTheme) -> Unit,
-    onRequestPermission: () -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+            .background(Color(0xFF000000))
     ) {
-        Column {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Box(
-                    modifier = Modifier
-                        .size(9.dp)
-                        .clip(CircleShape)
-                        .background(
-                            when {
-                                !hasPermission -> Color(0xFFEF4444)
-                                accuracyMeters in 0.1f..15.0f -> Color(0xFF10B981)
-                                gpsFixCount > 0 -> Color(0xFFF59E0B)
-                                else -> Color(0xFF64748B)
-                            }
-                        )
-                )
-                Text(
-                    text = "GPS SPEEDOMETER",
-                    color = Color.White,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    letterSpacing = 1.2.sp
-                )
-            }
+        // TOP BAR WITH GPS SIGNAL STRENGTH INDICATOR
+        TopHeader(
+            gpsLevel = gpsSignalLevel,
+            accuracyMeters = accuracyMeters,
+            onOpenDrawer = {},
+            onOpenSettings = { showSettingsDialog = true }
+        )
 
-            val statusText = when {
-                !hasPermission -> "Izin GPS Diperlukan"
-                accuracyMeters in 0.1f..15.0f -> "Satelit Terkunci (±${accuracyMeters.roundToInt()}m)"
-                gpsFixCount > 0 -> "Mencari Sinyal Satelit..."
-                else -> "Sensor GPS Offline Aktif"
-            }
-            Text(
-                text = statusText,
-                color = if (!hasPermission) Color(0xFFEF4444) else Color(0xFF94A3B8),
-                fontSize = 11.sp,
-                modifier = if (!hasPermission) Modifier.clickable { onRequestPermission() } else Modifier
-            )
-        }
+        // SUB-HEADER ROW: [RESET ↺] [ELAPSED TIME PILL] [HUD MODE]
+        SubHeaderControls(
+            elapsedSeconds = tripElapsedSeconds,
+            isHudMirror = isHudMirror,
+            onResetClick = { showResetDialog = true },
+            onToggleHud = { isHudMirror = !isHudMirror }
+        )
 
-        // UNIT SWITCHER PILL (KM/H, MPH, KNOTS)
-        Row(
+        // MAIN CONTENT BODY (Scrollable for compact screens)
+        Column(
             modifier = Modifier
-                .background(Color(0xFF131C2E), RoundedCornerShape(10.dp))
-                .border(1.dp, Color(0xFF1E293B), RoundedCornerShape(10.dp))
-                .padding(3.dp),
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween
         ) {
-            SpeedUnit.entries.forEach { item ->
-                val selected = unit == item
-                Box(
+            if (!hasLocationPermission) {
+                GpsPermissionCard(onRequestPermission = {
+                    permissionLauncher.launch(
+                        arrayOf(
+                            Manifest.permission.ACCESS_FINE_LOCATION,
+                            Manifest.permission.ACCESS_COARSE_LOCATION
+                        )
+                    )
+                })
+            }
+
+            // OVER SPEED ALERT BANNER
+            AnimatedVisibility(
+                visible = isOverSpeed,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
+                Surface(
+                    color = Color(0xFFDC2626).copy(alpha = pulseAlpha),
+                    shape = RoundedCornerShape(10.dp),
                     modifier = Modifier
-                        .clip(RoundedCornerShape(7.dp))
-                        .background(if (selected) selectedTheme.primary else Color.Transparent)
-                        .clickable { onUnitChange(item) }
-                        .padding(horizontal = 9.dp, vertical = 5.dp),
-                    contentAlignment = Alignment.Center
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
                 ) {
                     Text(
-                        text = item.label.uppercase(),
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                        fontSize = 11.sp,
-                        color = if (selected) Color(0xFF070B14) else Color(0xFF94A3B8)
+                        text = "⚠️ OVER SPEED! LIMIT: ${activeSpeedLimitInUnit.roundToInt()} ${unit.unitText}",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(vertical = 8.dp)
                     )
                 }
             }
+
+            when (activeTab) {
+                NavigationTab.ANALOG -> {
+                    // EXACT REFERENCE 1:1 ANALOG DIAL
+                    ReferenceSpeedometerDial(
+                        speed = animatedSpeed,
+                        rawSpeed = displaySpeed,
+                        unitText = unit.unitText,
+                        maxGauge = unit.maxGaugeValue,
+                        isOverSpeed = isOverSpeed
+                    )
+                }
+                NavigationTab.DIGITAL -> {
+                    // DIGITAL HUD DISPLAY
+                    DigitalSpeedDisplay(
+                        rawSpeed = displaySpeed,
+                        unitText = unit.unitText,
+                        isOverSpeed = isOverSpeed
+                    )
+                }
+                NavigationTab.MAP -> {
+                    // GPS METRICS & COORDS VIEW
+                    GpsMetricsDisplay(
+                        altitudeMeters = altitudeMeters,
+                        accuracyMeters = accuracyMeters,
+                        bearingDegrees = bearingDegrees,
+                        hasBearing = hasBearing,
+                        latitude = latitude,
+                        longitude = longitude
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // 3-COLUMN TELEMETRY PANEL: Max Speed | Distance | Avg Speed
+            ReferenceTelemetryPanel(
+                maxSpeed = String.format("%.0f", maxDisplaySpeed),
+                distance = String.format("%.1f", displayDistance),
+                avgSpeed = String.format("%.0f", avgSpeedDisplay),
+                speedUnit = unit.unitText,
+                distanceUnit = unit.distanceUnitText
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // PRIMARY CYAN "START / STOP" BUTTON
+            PrimaryActionButton(
+                isRunning = isTripRunning,
+                onClick = { isTripRunning = !isTripRunning }
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+        }
+
+        // BOTTOM NAVIGATION BAR (Analog | Digital | Map)
+        BottomNavigationBar(
+            selectedTab = activeTab,
+            onTabSelected = { activeTab = it }
+        )
+    }
+
+    // SETTINGS DIALOG (Units & Speed Limit)
+    if (showSettingsDialog) {
+        SettingsDialog(
+            currentUnit = unit,
+            currentLimitKmh = speedLimitKmh,
+            onSelectUnit = {
+                unit = it
+                prefs.edit().putString("unit", it.name).apply()
+            },
+            onSelectLimit = {
+                speedLimitKmh = it
+                prefs.edit().putFloat("speed_limit_kmh", it).apply()
+            },
+            onDismiss = { showSettingsDialog = false }
+        )
+    }
+
+    // RESET CONFIRMATION DIALOG
+    if (showResetDialog) {
+        AlertDialog(
+            onDismissRequest = { showResetDialog = false },
+            title = { Text("Reset Trip Data?") },
+            text = { Text("Max Speed, Distance, and Elapsed Time will be reset to 0.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        maxSpeedMps = 0f
+                        totalDistanceMeters = 0.0
+                        tripElapsedSeconds = 0L
+                        movingSeconds = 0L
+                        showResetDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF), contentColor = Color(0xFF000000))
+                ) {
+                    Text("Reset", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetDialog = false }) {
+                    Text("Cancel", color = Color.White)
+                }
+            }
+        )
+    }
+}
+
+// ==========================================
+// 1. TOP HEADER WITH GPS SIGNAL STRENGTH BARS
+// ==========================================
+@Composable
+fun TopHeader(
+    gpsLevel: Int,
+    accuracyMeters: Float,
+    onOpenDrawer: () -> Unit,
+    onOpenSettings: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconButton(onClick = onOpenDrawer, modifier = Modifier.size(36.dp)) {
+            Icon(
+                imageVector = Icons.Default.Menu,
+                contentDescription = "Menu",
+                tint = Color.White
+            )
+        }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "GPS Speedometer",
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            // GPS SIGNAL STRENGTH INDICATOR (4-BAR ANTENNA + BADGE)
+            GpsSignalStrengthBars(level = gpsLevel, accuracyMeters = accuracyMeters)
+        }
+
+        IconButton(onClick = onOpenSettings, modifier = Modifier.size(36.dp)) {
+            Icon(
+                imageVector = Icons.Default.Settings,
+                contentDescription = "Settings",
+                tint = Color.White
+            )
         }
     }
 }
 
 // ==========================================
-// HERO SPEEDOMETER GAUGE DIAL (CANVAS ENGINE)
+// GPS SIGNAL STRENGTH BARS COMPONENT (▂▄▆█)
 // ==========================================
 @Composable
-fun SpeedometerGauge(
+fun GpsSignalStrengthBars(
+    level: Int, // 0 to 4
+    accuracyMeters: Float
+) {
+    val barColor = when (level) {
+        4 -> Color(0xFF00E5FF) // Sangat Kuat (Cyan)
+        3 -> Color(0xFF10B981) // Kuat (Hijau)
+        2 -> Color(0xFFF59E0B) // Sedang (Kuning/Amber)
+        1 -> Color(0xFFEF4444) // Lemah (Merah)
+        else -> Color(0xFF525861) // Offline / Mencari (Abu-abu)
+    }
+
+    Row(
+        verticalAlignment = Alignment.Bottom,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        modifier = Modifier
+            .padding(start = 2.dp)
+            .height(16.dp)
+    ) {
+        // Bar 1 (Height 4dp)
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .height(4.dp)
+                .clip(RoundedCornerShape(1.dp))
+                .background(if (level >= 1) barColor else Color(0xFF333842))
+        )
+        // Bar 2 (Height 7dp)
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .height(7.dp)
+                .clip(RoundedCornerShape(1.dp))
+                .background(if (level >= 2) barColor else Color(0xFF333842))
+        )
+        // Bar 3 (Height 10dp)
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .height(10.dp)
+                .clip(RoundedCornerShape(1.dp))
+                .background(if (level >= 3) barColor else Color(0xFF333842))
+        )
+        // Bar 4 (Height 14dp)
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .height(14.dp)
+                .clip(RoundedCornerShape(1.dp))
+                .background(if (level >= 4) barColor else Color(0xFF333842))
+        )
+    }
+}
+
+// ==========================================
+// 2. SUB-HEADER CONTROLS (RESET, TIMER PILL, HUD)
+// ==========================================
+@Composable
+fun SubHeaderControls(
+    elapsedSeconds: Long,
+    isHudMirror: Boolean,
+    onResetClick: () -> Unit,
+    onToggleHud: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // RESET BUTTON (Dark circle with ↺)
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(Color(0xFF212327))
+                .clickable { onResetClick() },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Refresh,
+                contentDescription = "Reset Trip",
+                tint = Color.White,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+
+        // ELAPSED TIME PILL: [ 0:00:24 s ]
+        Surface(
+            color = Color(0xFF212327),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.height(38.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = formatTimerDuration(elapsedSeconds),
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    letterSpacing = 1.sp
+                )
+                Text(
+                    text = "s",
+                    color = Color(0xFF9EA5AF),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Normal
+                )
+            }
+        }
+
+        // HUD FLIP BUTTON (Dark circle)
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(if (isHudMirror) Color(0xFF00E5FF) else Color(0xFF212327))
+                .clickable { onToggleHud() },
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "HUD",
+                color = if (isHudMirror) Color(0xFF000000) else Color.White,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.ExtraBold
+            )
+        }
+    }
+}
+
+// ==========================================
+// 3. EXACT 1:1 REFERENCE SPEEDOMETER DIAL (CANVAS)
+// ==========================================
+@Composable
+fun ReferenceSpeedometerDial(
     speed: Float,
     rawSpeed: Float,
+    unitText: String,
     maxGauge: Int,
-    tickStep: Int,
-    unitLabel: String,
-    theme: CockpitTheme,
-    isOverSpeed: Boolean,
-    pulseAlpha: Float,
-    speedLimit: Float
+    isOverSpeed: Boolean
 ) {
     val fraction = (speed / maxGauge).coerceIn(0f, 1f)
-
-    val activeArcColor by animateColorAsState(
-        targetValue = when {
-            isOverSpeed -> Color(0xFFEF4444)
-            fraction > 0.75f -> Color(0xFFEF4444)
-            fraction > 0.45f -> Color(0xFFF59E0B)
-            else -> theme.primary
-        },
-        label = "arcColor"
-    )
 
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .fillMaxWidth()
-            .height(310.dp)
-            .padding(4.dp)
+            .height(320.dp)
+            .padding(top = 8.dp)
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val strokeWidth = 14.dp.toPx()
-            val center = Offset(size.width / 2f, size.height / 2f)
-            val outerRadius = (size.minDimension / 2f) - strokeWidth - 10.dp.toPx()
+            val center = Offset(size.width / 2f, size.height / 2f - 10.dp.toPx())
+            val strokeWidth = 18.dp.toPx()
+            val outerRadius = (size.minDimension / 2f) - strokeWidth - 14.dp.toPx()
 
             val arcTopLeft = Offset(center.x - outerRadius, center.y - outerRadius)
             val arcSize = Size(outerRadius * 2f, outerRadius * 2f)
 
-            // 1. DIAL INNER GLOW / BACKGROUND CIRCLE
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        Color(0xFF0F172A).copy(alpha = 0.7f),
-                        Color(0xFF070B14).copy(alpha = 0.95f)
-                    ),
-                    center = center,
-                    radius = outerRadius + strokeWidth
-                ),
-                radius = outerRadius + strokeWidth,
-                center = center
-            )
-
-            // 2. BACKGROUND TRACK ARC (Dark Gunmetal Ring)
+            // A. INACTIVE TRACK ARC (#525861)
             drawArc(
-                color = Color(0xFF1E293B),
+                color = Color(0xFF525861),
                 startAngle = 135f,
                 sweepAngle = 270f,
                 useCenter = false,
@@ -618,33 +710,10 @@ fun SpeedometerGauge(
                 style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
             )
 
-            // 3. SPEED LIMIT MARKER (Red tick along track if configured)
-            if (speedLimit in 1f..maxGauge.toFloat()) {
-                val limitFraction = (speedLimit / maxGauge).coerceIn(0f, 1f)
-                val limitAngleDeg = 135.0 + (270.0 * limitFraction)
-                val limitRad = Math.toRadians(limitAngleDeg)
-                val mInner = outerRadius - strokeWidth * 0.9f
-                val mOuter = outerRadius + strokeWidth * 0.9f
-                drawLine(
-                    color = Color(0xFFEF4444),
-                    start = Offset((center.x + mInner * cos(limitRad)).toFloat(), (center.y + mInner * sin(limitRad)).toFloat()),
-                    end = Offset((center.x + mOuter * cos(limitRad)).toFloat(), (center.y + mOuter * sin(limitRad)).toFloat()),
-                    strokeWidth = 3.5.dp.toPx(),
-                    cap = StrokeCap.Square
-                )
-            }
-
-            // 4. ACTIVE PROGRESS ARC (Dynamic Glow)
+            // B. ACTIVE TRACK ARC (#00E5FF Neon Cyan)
             if (fraction > 0.005f) {
                 drawArc(
-                    brush = Brush.sweepGradient(
-                        colors = listOf(
-                            theme.accent,
-                            activeArcColor,
-                            if (isOverSpeed) Color(0xFFEF4444) else activeArcColor
-                        ),
-                        center = center
-                    ),
+                    color = if (isOverSpeed) Color(0xFFEF4444) else Color(0xFF00E5FF),
                     startAngle = 135f,
                     sweepAngle = 270f * fraction,
                     useCenter = false,
@@ -652,487 +721,584 @@ fun SpeedometerGauge(
                     size = arcSize,
                     style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
                 )
+
+                // C. GLOWING LEAD INDICATOR DOT AT ACTIVE TIP
+                val leadAngleDeg = 135.0 + (270.0 * fraction)
+                val leadRad = Math.toRadians(leadAngleDeg)
+                val leadCenter = Offset(
+                    (center.x + outerRadius * cos(leadRad)).toFloat(),
+                    (center.y + outerRadius * sin(leadRad)).toFloat()
+                )
+
+                // Outer glow
+                drawCircle(
+                    color = (if (isOverSpeed) Color(0xFFEF4444) else Color(0xFF00E5FF)).copy(alpha = 0.45f),
+                    radius = strokeWidth * 0.9f,
+                    center = leadCenter
+                )
+                // Inner bright core
+                drawCircle(
+                    color = Color(0xFFE0FFFF),
+                    radius = strokeWidth * 0.35f,
+                    center = leadCenter
+                )
             }
 
-            // 5. GRADUATED TICKS AND SPEED NUMERALS
-            val totalTicks = (maxGauge / (tickStep / 2))
+            // D. RADIAL TICKS AND CYAN NUMBERS (0, 20, 40, ... 220)
+            val step = 20
+            val totalTicks = maxGauge / step
             val textPaint = Paint().apply {
-                color = android.graphics.Color.argb(190, 203, 213, 225)
-                textSize = 10.5.dp.toPx()
+                color = android.graphics.Color.parseColor("#3DE1FF")
+                textSize = 11.5.dp.toPx()
                 textAlign = Paint.Align.CENTER
                 typeface = Typeface.DEFAULT_BOLD
                 isAntiAlias = true
             }
 
             for (i in 0..totalTicks) {
-                val currentTickVal = i * (tickStep / 2)
-                val tickFraction = currentTickVal.toFloat() / maxGauge
+                val currentVal = i * step
+                val tickFraction = currentVal.toFloat() / maxGauge
                 val tickAngleDeg = 135.0 + (270.0 * tickFraction)
                 val tickRad = Math.toRadians(tickAngleDeg)
 
-                val isMajor = (currentTickVal % tickStep) == 0
-                val tickLength = if (isMajor) 11.dp.toPx() else 6.dp.toPx()
-                val tickWidth = if (isMajor) 2.2.dp.toPx() else 1.2.dp.toPx()
+                // Major white tick line
+                val tickOuterR = outerRadius - (strokeWidth / 2f) - 6.dp.toPx()
+                val tickInnerR = tickOuterR - 8.dp.toPx()
 
-                val tickOuterR = outerRadius - (strokeWidth / 2f) - 4.dp.toPx()
-                val tickInnerR = tickOuterR - tickLength
-
-                val start = Offset(
+                val tickStart = Offset(
                     (center.x + tickOuterR * cos(tickRad)).toFloat(),
                     (center.y + tickOuterR * sin(tickRad)).toFloat()
                 )
-                val end = Offset(
+                val tickEnd = Offset(
                     (center.x + tickInnerR * cos(tickRad)).toFloat(),
                     (center.y + tickInnerR * sin(tickRad)).toFloat()
                 )
 
                 drawLine(
-                    color = if (isMajor) Color(0xFF94A3B8) else Color(0xFF475569),
-                    start = start,
-                    end = end,
-                    strokeWidth = tickWidth,
-                    cap = StrokeCap.Round
+                    color = Color.White,
+                    start = tickStart,
+                    end = tickEnd,
+                    strokeWidth = 2.dp.toPx(),
+                    cap = StrokeCap.Square
                 )
 
-                // Draw major numerals around dial
-                if (isMajor) {
-                    val numRadius = tickInnerR - 11.dp.toPx()
-                    val nx = (center.x + numRadius * cos(tickRad)).toFloat()
-                    val ny = (center.y + numRadius * sin(tickRad)).toFloat()
+                // Dial Numerals (0, 20, 40, 60 ... 220) in #3DE1FF
+                val numRadius = tickInnerR - 11.dp.toPx()
+                val nx = (center.x + numRadius * cos(tickRad)).toFloat()
+                val ny = (center.y + numRadius * sin(tickRad)).toFloat()
 
-                    drawIntoCanvas { canvas ->
-                        val fm = textPaint.fontMetrics
-                        val yOffset = (fm.descent + fm.ascent) / 2f
-                        canvas.nativeCanvas.drawText(
-                            currentTickVal.toString(),
-                            nx,
-                            ny - yOffset,
-                            textPaint
-                        )
-                    }
+                drawIntoCanvas { canvas ->
+                    val fm = textPaint.fontMetrics
+                    val yOffset = (fm.descent + fm.ascent) / 2f
+                    canvas.nativeCanvas.drawText(
+                        currentVal.toString(),
+                        nx,
+                        ny - yOffset,
+                        textPaint
+                    )
+                }
+
+                // Minor intermediate tick between major ticks (if not last)
+                if (i < totalTicks) {
+                    val halfAngleDeg = tickAngleDeg + (270.0 / totalTicks / 2.0)
+                    val halfRad = Math.toRadians(halfAngleDeg)
+                    val halfStart = Offset(
+                        (center.x + tickOuterR * cos(halfRad)).toFloat(),
+                        (center.y + tickOuterR * sin(halfRad)).toFloat()
+                    )
+                    val halfEnd = Offset(
+                        (center.x + (tickOuterR - 4.dp.toPx()) * cos(halfRad)).toFloat(),
+                        (center.y + (tickOuterR - 4.dp.toPx()) * sin(halfRad)).toFloat()
+                    )
+                    drawLine(
+                        color = Color(0xFF717985),
+                        start = halfStart,
+                        end = halfEnd,
+                        strokeWidth = 1.2.dp.toPx(),
+                        cap = StrokeCap.Square
+                    )
                 }
             }
 
-            // 6. AERODYNAMIC NEEDLE (Tapered Polygon with Accent Tip)
+            // E. SHARP TAPERED WHITE NEEDLE
             val needleAngleDeg = 135.0 + (270.0 * fraction)
             val needleRad = Math.toRadians(needleAngleDeg)
             val perpRad = needleRad + Math.PI / 2.0
 
-            val needleLength = outerRadius - (strokeWidth / 2f) - 6.dp.toPx()
-            val needleBaseWidth = 6.dp.toPx()
-            val counterWeight = 20.dp.toPx()
+            val needleLength = outerRadius - strokeWidth - 14.dp.toPx()
+            val needleBaseWidth = 5.dp.toPx()
 
             val tip = Offset(
                 (center.x + needleLength * cos(needleRad)).toFloat(),
                 (center.y + needleLength * sin(needleRad)).toFloat()
             )
             val baseLeft = Offset(
-                (center.x - counterWeight * 0.5f * cos(needleRad) + needleBaseWidth * cos(perpRad)).toFloat(),
-                (center.y - counterWeight * 0.5f * sin(needleRad) + needleBaseWidth * sin(perpRad)).toFloat()
+                (center.x + needleBaseWidth * cos(perpRad)).toFloat(),
+                (center.y + needleBaseWidth * sin(perpRad)).toFloat()
             )
             val baseRight = Offset(
-                (center.x - counterWeight * 0.5f * cos(needleRad) - needleBaseWidth * cos(perpRad)).toFloat(),
-                (center.y - counterWeight * 0.5f * sin(needleRad) - needleBaseWidth * sin(perpRad)).toFloat()
-            )
-            val counterTip = Offset(
-                (center.x - counterWeight * cos(needleRad)).toFloat(),
-                (center.y - counterWeight * sin(needleRad)).toFloat()
+                (center.x - needleBaseWidth * cos(perpRad)).toFloat(),
+                (center.y - needleBaseWidth * sin(perpRad)).toFloat()
             )
 
             val needlePath = Path().apply {
                 moveTo(tip.x, tip.y)
                 lineTo(baseRight.x, baseRight.y)
-                lineTo(counterTip.x, counterTip.y)
                 lineTo(baseLeft.x, baseLeft.y)
                 close()
             }
 
-            // Needle shadow / glow
-            drawPath(
-                path = needlePath,
-                color = if (isOverSpeed) Color(0xFFEF4444) else activeArcColor
-            )
+            drawPath(path = needlePath, color = Color.White)
 
-            // Needle spine line
-            drawLine(
-                color = Color.White.copy(alpha = 0.85f),
-                start = center,
-                end = tip,
-                strokeWidth = 1.5.dp.toPx(),
-                cap = StrokeCap.Round
-            )
-
-            // 7. CENTER METALLIC HUB CAP
-            drawCircle(color = Color(0xFF1E293B), radius = 22.dp.toPx(), center = center)
+            // F. CENTER HUB PIVOT (Outer white ring + dark center hole)
             drawCircle(
-                color = Color(0xFF475569),
-                radius = 22.dp.toPx(),
-                center = center,
-                style = Stroke(width = 2.dp.toPx())
+                color = Color.White,
+                radius = 12.dp.toPx(),
+                center = center
             )
-            drawCircle(color = Color(0xFF0F172A), radius = 14.dp.toPx(), center = center)
             drawCircle(
-                color = if (isOverSpeed) Color(0xFFEF4444) else theme.primary,
-                radius = 5.dp.toPx(),
+                color = Color(0xFF15171B),
+                radius = 7.dp.toPx(),
                 center = center
             )
         }
 
-        // CENTER DIGITAL SPEED READOUT & UNIT BADGE
+        // G. DIGITAL SPEED READOUT INSIDE BOTTOM OPENING
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(top = 18.dp)
+            modifier = Modifier.padding(top = 110.dp)
         ) {
+            Row(
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = rawSpeed.roundToInt().toString(),
+                    fontSize = 56.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.SansSerif,
+                    color = if (isOverSpeed) Color(0xFFEF4444) else Color(0xFF00E5FF),
+                    letterSpacing = (-1).sp
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = unitText,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.White,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+            }
             Text(
-                text = rawSpeed.roundToInt().toString(),
-                fontSize = 74.sp,
-                fontWeight = FontWeight.Black,
-                fontFamily = FontFamily.Monospace,
-                color = if (isOverSpeed) Color(0xFFEF4444) else Color.White,
-                letterSpacing = (-2).sp
+                text = "Current Speed",
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium
             )
-
-            Row(
-                modifier = Modifier
-                    .background(
-                        if (isOverSpeed) Color(0xFFEF4444).copy(alpha = 0.2f) else theme.primary.copy(alpha = 0.15f),
-                        RoundedCornerShape(8.dp)
-                    )
-                    .border(
-                        1.dp,
-                        if (isOverSpeed) Color(0xFFEF4444) else theme.primary.copy(alpha = 0.5f),
-                        RoundedCornerShape(8.dp)
-                    )
-                    .padding(horizontal = 14.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Text(
-                    text = unitLabel,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = if (isOverSpeed) Color(0xFFEF4444) else theme.primary,
-                    letterSpacing = 1.sp
-                )
-            }
-
-            if (speedLimit > 0f) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "BATAS: ${speedLimit.roundToInt()} $unitLabel",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (isOverSpeed) Color(0xFFEF4444) else Color(0xFF94A3B8)
-                )
-            }
         }
     }
 }
 
 // ==========================================
-// TELEMETRY METRICS GRID (6 TILES)
+// 4. TELEMETRY PANEL (3 COLUMNS: MAX SPEED, DISTANCE, AVG SPEED)
 // ==========================================
 @Composable
-fun TelemetryGrid(
+fun ReferenceTelemetryPanel(
     maxSpeed: String,
-    avgSpeed: String,
     distance: String,
-    tripTime: String,
-    altitude: String,
-    heading: String,
-    accuracy: String,
-    coords: String,
-    theme: CockpitTheme
+    avgSpeed: String,
+    speedUnit: String,
+    distanceUnit: String
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            StatCard(
-                title = "KECEPATAN MAKS",
-                value = maxSpeed,
-                accentColor = Color(0xFFF43F5E),
-                modifier = Modifier.weight(1f)
-            )
-            StatCard(
-                title = "KECEPATAN RATA2",
-                value = avgSpeed,
-                accentColor = theme.accent,
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            StatCard(
-                title = "JARAK TEMPUH",
-                value = distance,
-                accentColor = theme.primary,
-                modifier = Modifier.weight(1f)
-            )
-            StatCard(
-                title = "WAKTU TEMPUH",
-                value = tripTime,
-                accentColor = Color(0xFF38BDF8),
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            StatCard(
-                title = "KETINGGIAN (ASL)",
-                value = altitude,
-                accentColor = Color(0xFFA855F7),
-                modifier = Modifier.weight(1f)
-            )
-            StatCard(
-                title = "ARAH KOMPAS",
-                value = heading,
-                accentColor = Color(0xFFEAB308),
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        // SATELLITE ACCURACY & GPS LOCATION BANNER
-        Surface(
-            color = Color(0xFF101726),
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(1.dp, Color(0xFF1E293B), RoundedCornerShape(12.dp))
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 9.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text("AKURASI SATELIT", color = Color(0xFF64748B), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Text(accuracy, color = Color(0xFFCBD5E1), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace)
-                }
-                Column(horizontalAlignment = Alignment.End) {
-                    Text("KOORDINAT GPS", color = Color(0xFF64748B), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Text(coords, color = Color(0xFFCBD5E1), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace)
-                }
-            }
-        }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        TelemetryCard(
+            label = "Max Speed",
+            value = maxSpeed,
+            unit = speedUnit,
+            modifier = Modifier.weight(1f)
+        )
+        TelemetryCard(
+            label = "Distance",
+            value = distance,
+            unit = distanceUnit,
+            modifier = Modifier.weight(1f)
+        )
+        TelemetryCard(
+            label = "Avg Speed",
+            value = avgSpeed,
+            unit = speedUnit,
+            modifier = Modifier.weight(1f)
+        )
     }
 }
 
 @Composable
-fun StatCard(
-    title: String,
+fun TelemetryCard(
+    label: String,
     value: String,
-    accentColor: Color,
+    unit: String,
     modifier: Modifier = Modifier
 ) {
     Surface(
-        color = Color(0xFF101726),
-        shape = RoundedCornerShape(14.dp),
-        modifier = modifier.border(1.dp, Color(0xFF1E293B), RoundedCornerShape(14.dp))
+        color = Color(0xFF191B1F),
+        shape = RoundedCornerShape(10.dp),
+        modifier = modifier
     ) {
-        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+        Column(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = label,
+                color = Color(0xFF9EA5AF),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Normal
+            )
+            Spacer(modifier = Modifier.height(4.dp))
             Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.Center
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(accentColor)
-                )
                 Text(
-                    text = title,
-                    color = Color(0xFF64748B),
-                    fontSize = 10.5.sp,
+                    text = value,
+                    color = Color(0xFF00E5FF),
+                    fontSize = 26.sp,
                     fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.5.sp
+                    fontFamily = FontFamily.SansSerif
+                )
+                Spacer(modifier = Modifier.width(3.dp))
+                Text(
+                    text = unit,
+                    color = Color(0xFFC4C9D1),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(bottom = 3.dp)
                 )
             }
-            Spacer(modifier = Modifier.height(4.dp))
+        }
+    }
+}
+
+// ==========================================
+// 5. PRIMARY ACTION BUTTON (CYAN "START / STOP")
+// ==========================================
+@Composable
+fun PrimaryActionButton(
+    isRunning: Boolean,
+    onClick: () -> Unit
+) {
+    Button(
+        onClick = onClick,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = Color(0xFF00E5FF),
+            contentColor = Color(0xFF000000)
+        ),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(54.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.PlayArrow,
+                contentDescription = null,
+                tint = Color(0xFF000000),
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
             Text(
-                text = value,
-                color = Color.White,
-                fontSize = 19.sp,
+                text = if (isRunning) "Stop" else "Start",
+                fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                maxLines = 1
+                color = Color(0xFF000000)
             )
         }
     }
 }
 
 // ==========================================
-// BOTTOM CONTROL ACTION BAR
+// 6. BOTTOM NAVIGATION BAR (ANALOG, DIGITAL, MAP)
 // ==========================================
 @Composable
-fun ControlActionBar(
-    isHudMirror: Boolean,
-    isTripPaused: Boolean,
-    activeLimitKmh: Float,
-    theme: CockpitTheme,
-    onToggleHud: () -> Unit,
-    onTogglePause: () -> Unit,
-    onOpenSpeedLimit: () -> Unit,
-    onResetClick: () -> Unit
+fun BottomNavigationBar(
+    selectedTab: NavigationTab,
+    onTabSelected: (NavigationTab) -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+    Surface(
+        color = Color(0xFF000000),
+        modifier = Modifier.fillMaxWidth()
+    ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceAround,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            // HUD MODE BUTTON
-            Button(
-                onClick = onToggleHud,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isHudMirror) Color(0xFF0284C7) else Color(0xFF1E293B),
-                    contentColor = Color.White
-                ),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.weight(1f)
-            ) {
-                Text(
-                    text = if (isHudMirror) "Exit HUD" else "Mode HUD Kaca",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            // SPEED LIMIT BUTTON
-            Button(
-                onClick = onOpenSpeedLimit,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (activeLimitKmh > 0f) Color(0xFFB45309) else Color(0xFF1E293B),
-                    contentColor = Color.White
-                ),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.weight(1f)
-            ) {
-                Text(
-                    text = if (activeLimitKmh > 0f) "Batas: ${activeLimitKmh.roundToInt()} km/h" else "Batas Speed",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            // PAUSE / RESUME TRIP BUTTON
-            Button(
-                onClick = onTogglePause,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isTripPaused) Color(0xFF047857) else Color(0xFF334155),
-                    contentColor = Color.White
-                ),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.weight(1f)
-            ) {
-                Text(
-                    text = if (isTripPaused) "▶ Lanjutkan Trip" else "⏸ Jeda Trip",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            // RESET TRIP BUTTON
-            OutlinedButton(
-                onClick = onResetClick,
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444)),
-                border = ButtonDefaults.outlinedButtonBorder.copy(brush = Brush.linearGradient(listOf(Color(0xFFEF4444), Color(0xFFEF4444)))),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.weight(1f)
-            ) {
-                Text("Reset Trip", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            NavigationTab.entries.forEach { tab ->
+                val isSelected = selectedTab == tab
+                Column(
+                    modifier = Modifier
+                        .clickable { onTabSelected(tab) }
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = tab.title,
+                        color = if (isSelected) Color(0xFF00E5FF) else Color(0xFF9EA5AF),
+                        fontSize = 14.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    if (isSelected) {
+                        Box(
+                            modifier = Modifier
+                                .width(36.dp)
+                                .height(3.dp)
+                                .clip(RoundedCornerShape(1.5.dp))
+                                .background(Color(0xFF00E5FF))
+                        )
+                    } else {
+                        Spacer(modifier = Modifier.height(3.dp))
+                    }
+                }
             }
         }
     }
 }
 
 // ==========================================
-// SPEED LIMIT DIALOG
+// DIGITAL SPEED DISPLAY VIEW
 // ==========================================
 @Composable
-fun SpeedLimitDialog(
+fun DigitalSpeedDisplay(
+    rawSpeed: Float,
+    unitText: String,
+    isOverSpeed: Boolean
+) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(300.dp)
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = rawSpeed.roundToInt().toString(),
+                fontSize = 110.sp,
+                fontWeight = FontWeight.Black,
+                fontFamily = FontFamily.SansSerif,
+                color = if (isOverSpeed) Color(0xFFEF4444) else Color(0xFF00E5FF),
+                letterSpacing = (-4).sp
+            )
+            Text(
+                text = unitText,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "Current Speed",
+                color = Color(0xFF9EA5AF),
+                fontSize = 15.sp
+            )
+        }
+    }
+}
+
+// ==========================================
+// GPS METRICS & COORDS VIEW
+// ==========================================
+@Composable
+fun GpsMetricsDisplay(
+    altitudeMeters: Double,
+    accuracyMeters: Float,
+    bearingDegrees: Float,
+    hasBearing: Boolean,
+    latitude: Double,
+    longitude: Double
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(300.dp)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Surface(
+            color = Color(0xFF191B1F),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Altitude", color = Color(0xFF9EA5AF), fontSize = 14.sp)
+                    Text(String.format("%.0f m ASL", altitudeMeters), color = Color(0xFF00E5FF), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Heading", color = Color(0xFF9EA5AF), fontSize = 14.sp)
+                    Text(if (hasBearing) String.format("%.0f°", bearingDegrees) else "—", color = Color(0xFF00E5FF), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("GPS Precision", color = Color(0xFF9EA5AF), fontSize = 14.sp)
+                    Text(if (accuracyMeters > 0f) String.format("±%.0f m", accuracyMeters) else "Searching...", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Coordinates", color = Color(0xFF9EA5AF), fontSize = 14.sp)
+                    Text(String.format("%.4f°, %.4f°", latitude, longitude), color = Color(0xFFCBD5E1), fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+                }
+            }
+        }
+    }
+}
+
+// ==========================================
+// PERMISSION CARD
+// ==========================================
+@Composable
+fun GpsPermissionCard(onRequestPermission: () -> Unit) {
+    Surface(
+        color = Color(0xFF191B1F),
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                "GPS Permission Required for Offline Speedometer",
+                color = Color.White,
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Button(
+                onClick = onRequestPermission,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF), contentColor = Color(0xFF000000))
+            ) {
+                Text("Enable GPS Sensor", fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+// ==========================================
+// SETTINGS DIALOG (UNITS & SPEED LIMIT)
+// ==========================================
+@Composable
+fun SettingsDialog(
+    currentUnit: SpeedUnit,
     currentLimitKmh: Float,
-    unit: SpeedUnit,
+    onSelectUnit: (SpeedUnit) -> Unit,
     onSelectLimit: (Float) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val presets = listOf(0f, 40f, 60f, 80f, 100f, 120f)
+    val limits = listOf(0f, 60f, 80f, 100f, 120f)
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Atur Peringatan Kecepatan") },
+        title = { Text("Speedometer Settings", color = Color.White) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "Aplikasi akan memberi peringatan getar dan warna merah ketika kecepatan melebihi batas yang dipilih:",
-                    fontSize = 13.sp,
-                    color = Color(0xFF94A3B8)
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                presets.forEach { kmh ->
-                    val isSelected = (currentLimitKmh == kmh)
-                    val label = if (kmh == 0f) "Nonaktifkan (OFF)" else "${kmh.roundToInt()} km/h (${(kmh * (unit.speedMultiplier / 3.6f)).roundToInt()} ${unit.label.uppercase()})"
-                    Surface(
-                        color = if (isSelected) Color(0xFF10B981).copy(alpha = 0.2f) else Color(0xFF1E293B),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onSelectLimit(kmh) }
-                            .border(
-                                1.dp,
-                                if (isSelected) Color(0xFF10B981) else Color.Transparent,
-                                RoundedCornerShape(10.dp)
-                            )
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text("Speed Unit", color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    SpeedUnit.entries.forEach { u ->
+                        val isSelected = u == currentUnit
+                        Surface(
+                            color = if (isSelected) Color(0xFF00E5FF) else Color(0xFF212327),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { onSelectUnit(u) }
                         ) {
-                            Text(label, color = if (isSelected) Color(0xFF10B981) else Color.White, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
-                            if (isSelected) Text("✓", color = Color(0xFF10B981), fontWeight = FontWeight.Bold)
+                            Text(
+                                text = u.label,
+                                color = if (isSelected) Color(0xFF000000) else Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+                        }
+                    }
+                }
+
+                Text("Over Speed Warning", color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold)
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    limits.forEach { lim ->
+                        val isSelected = lim == currentLimitKmh
+                        val text = if (lim == 0f) "OFF (No Alert)" else "${lim.roundToInt()} km/h"
+                        Surface(
+                            color = if (isSelected) Color(0xFF00E5FF).copy(alpha = 0.2f) else Color(0xFF212327),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSelectLimit(lim) }
+                                .border(
+                                    1.dp,
+                                    if (isSelected) Color(0xFF00E5FF) else Color.Transparent,
+                                    RoundedCornerShape(8.dp)
+                                )
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(text, color = if (isSelected) Color(0xFF00E5FF) else Color.White)
+                                if (isSelected) Text("✓", color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Tutup") }
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF), contentColor = Color(0xFF000000))
+            ) {
+                Text("Done", fontWeight = FontWeight.Bold)
+            }
         }
     )
 }
 
 // ==========================================
-// UTILITY FUNCTIONS
+// UTILITIES
 // ==========================================
-fun formatDuration(totalSeconds: Long): String {
+fun formatTimerDuration(totalSeconds: Long): String {
     val hours = totalSeconds / 3600
     val minutes = (totalSeconds % 3600) / 60
     val seconds = totalSeconds % 60
-    return if (hours > 0) {
-        String.format("%02d:%02d:%02d", hours, minutes, seconds)
-    } else {
-        String.format("%02d:%02d", minutes, seconds)
-    }
-}
-
-fun getDirectionLabel(bearing: Float): String {
-    val normalized = (bearing % 360 + 360) % 360
-    val directions = arrayOf("UTARA", "TIMUR LAUT", "TIMUR", "TENGGARA", "SELATAN", "BARAT DAYA", "BARAT", "BARAT LAUT")
-    val index = (((normalized + 22.5f) % 360) / 45).toInt().coerceIn(0, 7)
-    return "${directions[index]} (${normalized.roundToInt()}°)"
+    return String.format("%d:%02d:%02d", hours, minutes, seconds)
 }
